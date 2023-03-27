@@ -5,33 +5,48 @@ use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy_fly_camera::{FlyCamera, FlyCameraPlugin};
 use rand::Rng;
 
-struct Voxel {
+#[derive(Component, Debug)]
+struct MapPosition {
     pos: Vec3,
 }
 
-#[derive(Resource, Default)]
-struct Map {
-    voxels: Vec<Voxel>,
+impl MapPosition {
+    pub fn new(x: f32, y: f32, z: f32) -> Self {
+        Self { pos: Vec3::new(x, y, z) }
+    }
+}
+
+
+#[derive(Component, Debug)]
+struct WaterLevel {
+    depth: f32,
+}
+
+impl WaterLevel {
+    pub fn new(depth: f32) -> Self {
+        Self { depth }
+    }
 }
 
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .init_resource::<Map>()
-        .add_system(bevy::window::close_on_esc)
+        .insert_resource(ClearColor(Color::rgb_linear(0.05, 0.05, 0.1)))
         .add_startup_system(make_map)
         .add_startup_system(setup)
+        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_system(animate_light_direction)
+        .add_plugins(DefaultPlugins)
         .add_plugin(FlyCameraPlugin)
         .add_plugin(LogDiagnosticsPlugin::default())
-        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_system(bevy::window::close_on_esc)
         .run();
 }
 
 fn scaling(scale: f32, step_size: usize) -> f32 {
     let mut rng = rand::thread_rng();
-    // rng.gen_range(-scale..scale)
-    (rng.gen_range(0.0..1.0) * 2.0 - 1.0) * (step_size as f32) * scale
+    rng.gen_range(-scale..scale)
+    // (rng.gen_range(0.0..1.0) * 2.0 - 1.0) * (step_size as f32) * scale
 }
 
 fn gen_heigth_map() -> [[f32; 129]; 129] {
@@ -122,7 +137,6 @@ fn make_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut map: ResMut<Map>,
 ) {
     // Make a random height map
     let height_map: [[f32; 129]; 129] = gen_heigth_map();
@@ -141,20 +155,25 @@ fn make_map(
     }
     println!("min: {} max: {}", min, max);
 
-    for x in 0..100 {
-        for z in 0..100 {
-            map.voxels.push(Voxel { pos: Vec3::new(x as f32, height_map[x][z], z as f32) })
+    for x in 0..128 {
+        for z in 0..128 {
+            commands.spawn(MapPosition::new(x as f32, height_map[x][z], z as f32));
+            commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box::new(1.0, height_map[x][z] + f32::abs(min), 1.0))),
+                material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+                transform: Transform::from_xyz(x as f32, min, z as f32),
+                ..default()
+            });
         }
     };
-
-    for voxel in &map.voxels {
-        commands.spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-            material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            transform: Transform::from_translation(voxel.pos),
+    commands.spawn(MapPosition::new(64.0, height_map[64][64], 64.0))
+        .insert(WaterLevel::new(0.1))
+        .insert(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Box::new(1.0, 0.1, 1.0))),
+            material: materials.add(Color::rgba(0.1, 0.01, 0.5, 0.5).into()),
+            transform: Transform::from_xyz(64.0, height_map[64][64], 64.0),
             ..default()
         });
-    }
 }
 
 fn setup(
@@ -163,20 +182,20 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(shape::Plane::from_size(500.0).into()),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-        ..default()
-    });
-
-    // commands.insert_resource(AmbientLight {
-    //     color: Color::AZURE,
-    //     brightness: 0.02,
+    // commands.spawn(PbrBundle {
+    //     mesh: meshes.add(shape::Plane::from_size(500.0).into()),
+    //     material: materials.add(Color::rgba(0.3, 0.5, 0.3, 0.4).into()),
+    //     ..default()
     // });
+
+    commands.insert_resource(AmbientLight {
+        color: Color::AZURE,
+        brightness: 0.02,
+    });
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
             color: Color::rgb(1.0, 0.9, 0.9),
-            illuminance: 1000.0,
+            illuminance: 10000.0,
             shadows_enabled: true,
             ..default()
         },
@@ -214,4 +233,16 @@ fn setup(
             ..default()
         })
         .insert(FlyCamera::default());
+}
+
+/// Make the lights move around
+///
+/// Would be much cooler with day night cycle
+fn animate_light_direction(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<DirectionalLight>>,
+) {
+    for mut transform in &mut query {
+        transform.rotate_y(time.delta_seconds() * 0.5);
+    }
 }

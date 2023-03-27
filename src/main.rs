@@ -1,21 +1,29 @@
 use std::f32::consts::PI;
 
-use bevy::{pbr::CascadeShadowConfigBuilder, prelude::*};
+use bevy::{pbr::CascadeShadowConfigBuilder, pbr::NotShadowCaster, prelude::*};
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy_fly_camera::{FlyCamera, FlyCameraPlugin};
 use rand::Rng;
 
+/// Holder for map positions
+///
+/// the pos values to world map looks like:
+/// z -- latitude (positive north, negative south)
+/// y -- height
+/// x -- longitude (positive east, negative west)
 #[derive(Component, Debug)]
 struct MapPosition {
     pos: Vec3,
 }
 
+
 impl MapPosition {
     pub fn new(x: f32, y: f32, z: f32) -> Self {
-        Self { pos: Vec3::new(x, y, z) }
+        Self {
+            pos: Vec3::new(x, y, z),
+        }
     }
 }
-
 
 #[derive(Component, Debug)]
 struct WaterLevel {
@@ -28,7 +36,6 @@ impl WaterLevel {
     }
 }
 
-
 fn main() {
     App::new()
         .insert_resource(ClearColor(Color::rgb_linear(0.05, 0.05, 0.1)))
@@ -36,6 +43,7 @@ fn main() {
         .add_startup_system(setup)
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_system(animate_light_direction)
+        .add_system(water_simulation)
         .add_plugins(DefaultPlugins)
         .add_plugin(FlyCameraPlugin)
         .add_plugin(LogDiagnosticsPlugin::default())
@@ -69,30 +77,41 @@ fn gen_heigth_map() -> [[f32; 129]; 129] {
         // Diamond step
         for x in (0..WIDTH - 1).step_by(step_size) {
             for z in (0..WIDTH - 1).step_by(step_size) {
-                println!("diamond step: {:?},{:?} {:?} {:?}", x, z, step_size, half_step);
+                println!(
+                    "diamond step: {:?},{:?} {:?} {:?}",
+                    x, z, step_size, half_step
+                );
 
                 let top_left = height_map[x][z];
                 let top_right = height_map[x + step_index][z];
                 let bottom_left = height_map[x][z + step_index];
                 let bottom_right = height_map[x + step_index][z + step_index];
-                let middle = (top_left + top_right + bottom_right + bottom_left) / 4.0 + scaling(scale, step_size);
+                let middle = (top_left + top_right + bottom_right + bottom_left) / 4.0
+                    + scaling(scale, step_size);
                 height_map[x + half_step_index][z + half_step_index] = middle;
             }
         }
         // Square Step
         for x in (0..WIDTH - 1).step_by(step_size) {
             for z in (0..WIDTH - 1).step_by(step_size) {
-                println!("square step: {:?},{:?} {:?} {:?}", x, z, step_size, half_step);
+                println!(
+                    "square step: {:?},{:?} {:?} {:?}",
+                    x, z, step_size, half_step
+                );
                 let top_left = height_map[x][z];
                 let top_right = height_map[x + step_index][z];
                 let bottom_left = height_map[x][z + step_index];
                 let bottom_right = height_map[x + step_index][z + step_index];
                 let middle = height_map[x + half_step][z + half_step];
 
-                height_map[x][z + half_step_index] = (top_left + middle + bottom_left) / 3.0 + scaling(scale, step_size);
-                height_map[x + half_step_index][z] = (top_left + middle + top_right) / 3.0 + scaling(scale, step_size);
-                height_map[x + step_index][z + step_index] = (top_right + middle + bottom_right) / 3.0 + scaling(scale, step_size);
-                height_map[x + half_step_index][z + step_index] = (bottom_left + middle + bottom_right) / 3.0 + scaling(scale, step_size);
+                height_map[x][z + half_step_index] =
+                    (top_left + middle + bottom_left) / 3.0 + scaling(scale, step_size);
+                height_map[x + half_step_index][z] =
+                    (top_left + middle + top_right) / 3.0 + scaling(scale, step_size);
+                height_map[x + step_index][z + step_index] =
+                    (top_right + middle + bottom_right) / 3.0 + scaling(scale, step_size);
+                height_map[x + half_step_index][z + step_index] =
+                    (bottom_left + middle + bottom_right) / 3.0 + scaling(scale, step_size);
             }
         }
         // Prep
@@ -132,7 +151,6 @@ fn gen_heigth_map() -> [[f32; 129]; 129] {
     height_map
 }
 
-
 fn make_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -159,21 +177,27 @@ fn make_map(
         for z in 0..128 {
             commands.spawn(MapPosition::new(x as f32, height_map[x][z], z as f32));
             commands.spawn(PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Box::new(1.0, height_map[x][z] + f32::abs(min), 1.0))),
+                mesh: meshes.add(Mesh::from(shape::Box::new(
+                    1.0,
+                    height_map[x][z] + f32::abs(min),
+                    1.0,
+                ))),
                 material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
                 transform: Transform::from_xyz(x as f32, min, z as f32),
                 ..default()
             });
         }
-    };
-    commands.spawn(MapPosition::new(64.0, height_map[64][64], 64.0))
+    }
+    commands
+        .spawn(MapPosition::new(64.0, height_map[64][64], 64.0))
         .insert(WaterLevel::new(0.1))
         .insert(PbrBundle {
             mesh: meshes.add(Mesh::from(shape::Box::new(1.0, 0.1, 1.0))),
             material: materials.add(Color::rgba(0.1, 0.01, 0.5, 0.5).into()),
             transform: Transform::from_xyz(64.0, height_map[64][64], 64.0),
             ..default()
-        });
+        })
+        .insert(NotShadowCaster);
 }
 
 fn setup(
@@ -204,8 +228,7 @@ fn setup(
             rotation: Quat::from_rotation_x(-PI / 4.),
             ..default()
         },
-        ..default()
-        // The default cascade config is designed to handle large scenes.
+        ..default() // The default cascade config is designed to handle large scenes.
         // As this example has a much smaller world, we can tighten the shadow
         // bounds for better visual quality.
         // cascade_shadow_config: CascadeShadowConfigBuilder {
@@ -229,7 +252,8 @@ fn setup(
     // camera
     commands
         .spawn(Camera3dBundle {
-            transform: Transform::from_xyz(50.0, 10.0, 50.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+            transform: Transform::from_xyz(50.0, 10.0, 50.0)
+                .looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
             ..default()
         })
         .insert(FlyCamera::default());
@@ -243,6 +267,118 @@ fn animate_light_direction(
     mut query: Query<&mut Transform, With<DirectionalLight>>,
 ) {
     for mut transform in &mut query {
-        transform.rotate_y(time.delta_seconds() * 0.5);
+        transform.rotate_y(time.delta_seconds() * 0.01);
+    }
+}
+
+
+/// Simulate water flow
+///
+fn water_simulation(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    time: Res<Time>,
+    mut water: Query<(Entity, &MapPosition, &mut WaterLevel, &Handle<Mesh>)>,
+    mut dry: Query<(Entity, &MapPosition), Without<WaterLevel>>,
+) {
+    let mut total_height_map: [[f32; 128]; 128] = [[0.0; 128]; 128];
+    let mut water_levels: [[f32; 128]; 128] = [[0.0; 128]; 128];
+    for (entity, map_pos) in dry.iter() {
+        total_height_map[map_pos.pos.x as usize][map_pos.pos.z as usize] = map_pos.pos.y;
+    }
+
+    // 0. Update water source with more water (e.g. add some water to 64,64.
+    for (entity, map_pos, mut level, mut mesh) in water.iter_mut() {
+        if map_pos.pos.x == 64.0 && map_pos.pos.z == 64.0 {
+           //  eprintln!("Add water at {:?} have water {:?}  mesh {:?}", map_pos, level, mesh);
+            level.depth = level.depth + 0.1 * time.delta_seconds();
+        }
+        total_height_map[map_pos.pos.x as usize][map_pos.pos.z as usize] = map_pos.pos.y + level.depth;
+        water_levels[map_pos.pos.x as usize][map_pos.pos.z as usize] = level.depth;
+    }
+
+
+    // 1. For each positions with water:
+    //    Spill over water to any neighbour with lower total water level, add water level and
+    //    Pbr if needed.
+    for (entity, map_pos, mut level, mut mesh) in water.iter_mut() {
+        // eprintln!("Entity {:?} at {:?} have water {:?}  mesh {:?}", entity, map_pos, level, mesh);
+        // For north, east, south, west
+        let mut my_total = map_pos.pos.y + level.depth;
+        let x = map_pos.pos.x as usize;
+        let z = map_pos.pos.z as usize;
+
+        if z >= 1 {
+            let other_height = total_height_map[x][z - 1];
+            let level_diff = my_total -  other_height;
+            //eprintln!("north me {} other {} diff {}", my_total, other_height, level_diff);
+            if level_diff > 0.0 {
+                let change = (level_diff / 4.0) * time.delta_seconds();
+                water_levels[x][z - 1] = water_levels[x][z - 1] + change;
+                water_levels[x][z] = water_levels[x][z] - change;
+            }
+        }
+        if x <= 127 {
+            let other_height = total_height_map[x+1][z];
+            let level_diff = my_total -  other_height;
+            //eprintln!("east me {} other {} diff {}", my_total, other_height, level_diff);
+            if level_diff > 0.0 {
+                let change = (level_diff / 4.0) * time.delta_seconds();
+                water_levels[x+1][z] = water_levels[x+1][z] + change;
+                water_levels[x][z] = water_levels[x][z] - change;
+            }
+        }
+        if z <= 127 {
+            let other_height = total_height_map[x][z+1];
+            let level_diff = my_total -  other_height;
+            // eprintln!("east me {} other {} diff {}", my_total, other_height, level_diff);
+            if level_diff > 0.0 {
+                let change = (level_diff / 4.0) * time.delta_seconds();
+                water_levels[x][z+1] = water_levels[x][z+1] + change;
+                water_levels[x][z] = water_levels[x][z] - change;
+            }
+        }
+        if x >= 1 {
+            let other_height = total_height_map[x-1][z];
+            let level_diff = my_total -  other_height;
+            // eprintln!("east me {} other {} diff {}", my_total, other_height, level_diff);
+            if level_diff > 0.0 {
+                let change = (level_diff / 4.0) * time.delta_seconds();
+                water_levels[x-1][z] = water_levels[x-1][z] + change;
+                water_levels[x][z] = water_levels[x][z] - change;
+            }
+        }
+    }
+
+    // println!("water: {:?}", water_levels);
+    // 2. For all positions, update the water mesh if water level is new
+    for (entity, map_pos, mut level, mut mesh) in water.iter_mut() {
+        if level.depth != water_levels[map_pos.pos.x as usize][map_pos.pos.z as usize] {
+            level.depth = water_levels[map_pos.pos.x as usize][map_pos.pos.z as usize];
+            meshes.set_untracked(mesh,
+                Mesh::from(shape::Box::new(1.0, level.depth, 1.0))
+            );
+        }
+        water_levels[map_pos.pos.x as usize][map_pos.pos.z as usize] = -1.0;
+    }
+    for (entity, map_pos) in dry.iter() {
+        if water_levels[map_pos.pos.x as usize][map_pos.pos.z as usize] > 0.0 {
+            commands.entity(entity)
+                .insert(
+                    PbrBundle {
+                        mesh: meshes.add(
+                            Mesh::from(shape::Box::new(
+                                1.0,
+                                water_levels[map_pos.pos.x as usize][map_pos.pos.z as usize],
+                                1.0))),
+                        material: materials.add(Color::rgba(0.1, 0.01, 0.5, 0.5).into()),
+                        transform: Transform::from_xyz(map_pos.pos.x, map_pos.pos.y, map_pos.pos.z),
+                        ..default()
+                    }
+                )
+                .insert(WaterLevel::new(water_levels[map_pos.pos.x as usize][map_pos.pos.z as usize]))
+                .insert(NotShadowCaster);
+        }
     }
 }
